@@ -697,6 +697,56 @@
     line-height: 1.4;
   }
 
+  .live-search-section {
+    border-top: 1px solid var(--panel-line);
+    margin-top: 10px;
+  }
+  .live-search-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px 6px;
+    font-family: 'Black Han Sans', sans-serif;
+    font-size: 0.85rem;
+    color: var(--egg);
+  }
+  .live-search-header span:last-child {
+    font-family: 'Gowun Dodum', sans-serif;
+    font-size: 0.74rem;
+    color: var(--cream-dim);
+  }
+  .live-card {
+    padding: 12px 18px;
+    border-bottom: 1px dashed var(--panel-line);
+  }
+  .live-card .live-name {
+    font-family: 'Black Han Sans', sans-serif;
+    font-size: 0.96rem;
+    color: var(--cream);
+  }
+  .live-card .live-meta {
+    font-size: 0.78rem;
+    color: var(--cream-dim);
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+  .live-card .live-links {
+    margin-top: 6px;
+    display: flex;
+    gap: 14px;
+  }
+  .live-card .live-link {
+    font-size: 0.76rem;
+    color: var(--egg);
+    text-decoration: none;
+    border-bottom: 1px dashed var(--egg);
+  }
+  .live-no-rating-note {
+    font-size: 0.7rem;
+    color: var(--cream-dim);
+    padding: 0 18px 10px;
+  }
+
   .rest-link {
     display: inline-block;
     margin-top: 8px;
@@ -1521,6 +1571,13 @@
           </div>
           <div class="list-count" id="listCount"></div>
           <div id="list"></div>
+          <div class="live-search-section" id="liveSearchSection" hidden>
+            <div class="live-search-header">
+              <span>🔍 카카오맵 실시간 검색 결과</span>
+              <span id="liveSearchStatus"></span>
+            </div>
+            <div id="liveSearchList"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1900,7 +1957,74 @@
     }
     renderList();
     renderMarkers();
+    scheduleLiveSearch(searchInput.value.trim());
   });
+
+  // ---- 카카오 로컬 API 실시간 검색 (평점 정보는 없음 — 이름/주소/전화/카테고리만 제공) ----
+  const LIVE_SEARCH_API = 'https://project-1-lac.vercel.app/api/search';
+  const liveSearchSection = document.getElementById('liveSearchSection');
+  const liveSearchList = document.getElementById('liveSearchList');
+  const liveSearchStatus = document.getElementById('liveSearchStatus');
+  let liveSearchTimer = null;
+  let liveSearchRequestId = 0;
+
+  function scheduleLiveSearch(rawQuery){
+    clearTimeout(liveSearchTimer);
+    if (!rawQuery) {
+      liveSearchSection.hidden = true;
+      liveSearchList.innerHTML = '';
+      return;
+    }
+    liveSearchTimer = setTimeout(() => runLiveSearch(rawQuery), 450); // 타이핑 멈추고 0.45초 뒤 검색 (과도한 호출 방지)
+  }
+
+  async function runLiveSearch(rawQuery){
+    const thisRequestId = ++liveSearchRequestId;
+    liveSearchSection.hidden = false;
+    liveSearchStatus.textContent = '검색 중…';
+    liveSearchList.innerHTML = '';
+
+    try {
+      const res = await fetch(`${LIVE_SEARCH_API}?query=${encodeURIComponent(rawQuery + ' 맛집')}`);
+      const data = await res.json();
+      if (thisRequestId !== liveSearchRequestId) return; // 그 사이 검색어가 또 바뀐 경우 옛 응답은 무시
+
+      if (!res.ok || data.error) {
+        liveSearchStatus.textContent = '검색 실패';
+        liveSearchList.innerHTML = `<div class="empty-state">실시간 검색을 불러오지 못했어요. (${data.error || res.status})</div>`;
+        return;
+      }
+
+      const results = data.restaurants || [];
+      liveSearchStatus.textContent = `${results.length}곳`;
+
+      if (results.length === 0) {
+        liveSearchList.innerHTML = `<div class="empty-state">'${rawQuery}' 실시간 검색 결과가 없어요.</div>`;
+        return;
+      }
+
+      liveSearchList.innerHTML = '';
+      results.forEach((place) => {
+        const card = document.createElement('div');
+        card.className = 'live-card';
+        card.innerHTML = `
+          <div class="live-name">${place.name}</div>
+          <div class="live-meta">
+            ${place.category ? place.category.replace('음식점 > ', '') + ' · ' : ''}${place.address}
+            ${place.phone ? '· ' + place.phone : ''}
+          </div>
+          <div class="live-links">
+            <a class="live-link" href="${place.placeUrl}" target="_blank" rel="noopener">카카오맵에서 보기 →</a>
+          </div>
+        `;
+        liveSearchList.appendChild(card);
+      });
+    } catch (err) {
+      if (thisRequestId !== liveSearchRequestId) return;
+      liveSearchStatus.textContent = '검색 실패';
+      liveSearchList.innerHTML = `<div class="empty-state">실시간 검색 중 오류가 발생했어요.</div>`;
+    }
+  }
 
   mapSearchInput.addEventListener('input', () => {
     searchTerm = mapSearchInput.value.trim().toLowerCase();
@@ -2750,6 +2874,8 @@
         listContent.hidden = true;
         searchInput.value = '';
         searchTerm = '';
+        liveSearchSection.hidden = true;
+        liveSearchList.innerHTML = '';
       }
       setActiveTab(btn.dataset.tab);
     });
